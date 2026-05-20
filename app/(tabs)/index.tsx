@@ -1,98 +1,144 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { FlatList, Image, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { deleteUser, getAllUsers, User } from '@/services/userService';
+import { router, useFocusEffect } from 'expo-router';
 
-export default function HomeScreen() {
+const isRenderableAvatar = (value?: string | null) =>
+  typeof value === 'string' && /^(https?:|file:|blob:|data:)/i.test(value);
+
+const getAgeText = (item: User) => {
+  if (item.birthday) {
+    const birthDate = new Date(item.birthday);
+    if (!Number.isNaN(birthDate.getTime())) {
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDifference = today.getMonth() - birthDate.getMonth();
+
+      if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+        age -= 1;
+      }
+
+      return `Age · ${age}`;
+    }
+  }
+
+  return `Age · ${item.age}`;
+};
+
+function UserCard({ item, onEdit }: { item: User; onEdit: () => void }) {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <Pressable style={styles.card} onPress={onEdit}>
+      <Image 
+        source={isRenderableAvatar(item.avatar) ? { uri: item.avatar } : require('@/assets/images/icon.png')} 
+        style={styles.avatar} 
+      />
+      <View style={styles.cardText}>
+        <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
+        <ThemedText>{getAgeText(item)}</ThemedText>
+      </View>
+    </Pressable>
+  );
+}
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+export default function HomeListScreen() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    setErrorMessage('');
+    try {
+      const data = await getAllUsers();
+      setUsers(data);
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to load users');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchUsers();
+    }, [])
+  );
+
+  const handleDelete = async (userId: string) => {
+    try {
+      await deleteUser(userId);
+      setUsers((currentUsers) => currentUsers.filter((user) => user.id !== userId));
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+    }
+  };
+
+  return (
+    <ThemedView style={styles.container}>
+      <ThemedText type="title" style={styles.header}>Home screen</ThemedText>
+      {loading ? <ThemedText style={styles.statusText}>Loading users...</ThemedText> : null}
+      {errorMessage ? <ThemedText style={styles.errorText}>{errorMessage}</ThemedText> : null}
+      {!loading && !errorMessage && users.length === 0 ? (
+        <ThemedText style={styles.statusText}>No users found yet. Tap + to create one.</ThemedText>
+      ) : null}
+      <FlatList 
+        data={users} 
+        ListEmptyComponent={null}
+        renderItem={({ item }) => (
+          <UserCard
+            item={item}
+            onEdit={() => item.id && router.push({ pathname: '/edit-user', params: { id: item.id } })}
+          />
+        )}
+        keyExtractor={(i) => i.id ?? `${i.username}-${i.name}`}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchUsers} />}
+      />
+
+      <Pressable style={styles.fab} onPress={() => router.push('/edit-user')}>
+        <IconSymbol name="plus" size={24} color="#fff" />
+        <ThemedText style={styles.fabText}>Add</ThemedText>
+      </Pressable>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: { flex: 1, padding: 12, maxWidth: 800, alignSelf: 'center', width: '100%' },
+  header: { fontSize: 24, marginBottom: 16, fontWeight: '700' },
+  statusText: { marginBottom: 12, color: '#666', fontSize: 14 },
+  errorText: { marginBottom: 12, color: '#D32F2F', fontSize: 14, fontWeight: '600' },
+  card: { flexDirection: 'row', gap: 12, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd', marginBottom: 8, alignItems: 'center', backgroundColor: '#fff' },
+  avatar: { width: 48, height: 48, borderRadius: 24 },
+  cardText: { flex: 1 },
+  fab: {
+    position: 'absolute',
+    right: 18,
+    bottom: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 28,
+    backgroundColor: '#128CFF',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    justifyContent: 'center',
+    elevation: 4,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 3px rgba(0, 0, 0, 0.25)',
+      },
+      default: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3,
+      },
+    }),
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  fabText: { color: '#fff', fontWeight: '600', fontSize: 16 },
 });
